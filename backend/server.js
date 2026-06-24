@@ -121,6 +121,26 @@ function startDrawingPhase(room) {
   room.drawings = [];
   assignWordPairs(room);
 
+  const drawTime = room.settings.drawTime || 75;
+  startTimer(room, drawTime, null, () => {
+    // Süre dolunca çizim göndermeyenlerin yerine boş kayıt ekle
+    room.players.forEach((player) => {
+      const alreadySubmitted = room.drawings.find((d) => d.playerId === player.id);
+      if (!alreadySubmitted) {
+        const pair = room.wordPairs.find((p) => p.playerId === player.id);
+        room.drawings.push({
+          playerId: player.id,
+          playerName: player.name,
+          imageData: null,
+          productName: `${pair?.adjective} ${pair?.noun}`,
+          slogan: '(Süre doldu)',
+          wordPair: pair,
+        });
+      }
+    });
+    startPresentationPhase(room);
+  });
+
   io.to(room.id).emit('game_phase_changed', {
     phase: 'drawing',
     state: getRoomPublicState(room),
@@ -133,9 +153,6 @@ function startDrawingPhase(room) {
       noun: pair.noun,
     });
   });
-
-  const drawTime = room.settings.drawTime || 75;
-  startTimer(room, drawTime, null, () => {
     // Süre dolunca çizim göndermeyenlerin yerine boş kayıt ekle
     room.players.forEach((player) => {
       const alreadySubmitted = room.drawings.find((d) => d.playerId === player.id);
@@ -164,6 +181,9 @@ function startPresentationPhase(room) {
   room.drawings.forEach((d) => {
     room.investments[d.playerId] = {};
   });
+
+  const presentTime = room.settings.presentTime || 30;
+  room.timerSeconds = presentTime; // Just to make sure state has it before emit
 
   io.to(room.id).emit('game_phase_changed', {
     phase: 'presentation',
@@ -202,6 +222,9 @@ function presentNextProduct(room) {
 function startInvestmentPhase(room, drawing) {
   room.phase = 'investment';
   clearTimer(room);
+
+  const investTime = room.settings.investTime || 15;
+  room.timerSeconds = investTime; // Ensure state has the timer value before emit
 
   io.to(room.id).emit('game_phase_changed', {
     phase: 'investment',
@@ -418,7 +441,9 @@ io.on('connection', (socket) => {
 
   // ── join_room ────────────────────────────────────────────────────────────
   socket.on('join_room', ({ roomId, playerName }) => {
-    const room = rooms[roomId];
+    if (!roomId) return socket.emit('error', { message: 'Oda kodu eksik.' });
+    const upperRoomId = roomId.toUpperCase();
+    const room = rooms[upperRoomId];
 
     if (!room) return socket.emit('error', { message: 'Oda bulunamadı.' });
     if (room.phase !== 'lobby') return socket.emit('error', { message: 'Oyun zaten başladı.' });
@@ -434,14 +459,14 @@ io.on('connection', (socket) => {
     const player = { id: socket.id, name: playerName.trim(), budget: 50000, isHost: false };
     room.players.push(player);
 
-    socket.join(roomId);
-    socket.data.roomId = roomId;
+    socket.join(upperRoomId);
+    socket.data.roomId = upperRoomId;
     socket.data.playerName = playerName.trim();
 
-    socket.emit('room_joined', { roomId, player });
-    io.to(roomId).emit('room_updated', getRoomPublicState(room));
-    io.to(roomId).emit('player_joined', { player });
-    console.log(`[Room] ${playerName} joined ${roomId}`);
+    socket.emit('room_joined', { roomId: upperRoomId, player });
+    io.to(upperRoomId).emit('room_updated', getRoomPublicState(room));
+    io.to(upperRoomId).emit('player_joined', { player });
+    console.log(`[Room] ${playerName} joined ${upperRoomId}`);
   });
 
   // ── update_settings ──────────────────────────────────────────────────────
